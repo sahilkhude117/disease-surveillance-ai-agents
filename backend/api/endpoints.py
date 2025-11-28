@@ -27,7 +27,13 @@ def get_surveillance_manager() -> SurveillanceManager:
     """Get or create surveillance manager instance"""
     global surveillance_manager
     if surveillance_manager is None:
-        surveillance_manager = SurveillanceManager()
+        from config.settings import get_database_connection_string
+        try:
+            connection_string = get_database_connection_string()
+        except ValueError:
+            # If no database configured, initialize with None
+            connection_string = None
+        surveillance_manager = SurveillanceManager(connection_string)
     return surveillance_manager
 
 

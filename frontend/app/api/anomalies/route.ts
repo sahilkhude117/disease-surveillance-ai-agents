@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     if (severity) params.append('severity', severity);
     params.append('days', days);
 
-    const response = await fetch(`${API_URL}/anomalies?${params.toString()}`, {
+    const response = await fetch(`${API_URL}/api/anomalies?${params.toString()}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

@@ -43,47 +43,57 @@ load_dotenv()
 class SurveillanceManager:
     """Manages the disease surveillance AI agent system."""
     
-    def __init__(self, connection_string):
+    def __init__(self, connection_string=None):
         """Initialize the surveillance manager.
         
         Args:
-            connection_string: The database connection string.
+            connection_string: The database connection string (optional, will load from env if not provided).
         """
+        # Get connection string from settings if not provided
+        if connection_string is None:
+            from config.settings import get_database_connection_string
+            try:
+                connection_string = get_database_connection_string()
+            except ValueError:
+                print("WARNING: Database connection string not configured")
+                connection_string = ""
+        
         self.connection_string = connection_string
         
         # Initialize plugins with error handling
         try:
-            self.data_collection_plugin = DataCollectionPlugin(connection_string)
+            self.data_collection_plugin = DataCollectionPlugin(connection_string) if connection_string else None
         except Exception as e:
             print(f"Error initializing data collection plugin: {e}")
             self.data_collection_plugin = None
             
         try:
-            self.anomaly_detection_plugin = AnomalyDetectionPlugin(connection_string)
+            self.anomaly_detection_plugin = AnomalyDetectionPlugin(connection_string) if connection_string else None
         except Exception as e:
             print(f"Error initializing anomaly detection plugin: {e}")
             self.anomaly_detection_plugin = None
             
         try:
-            self.prediction_plugin = PredictionPlugin(connection_string)
+            self.prediction_plugin = PredictionPlugin(connection_string) if connection_string else None
         except Exception as e:
             print(f"Error initializing prediction plugin: {e}")
             self.prediction_plugin = None
             
         try:
-            self.alert_plugin = AlertPlugin(connection_string)
+            self.alert_plugin = AlertPlugin(connection_string) if connection_string else None
         except Exception as e:
             print(f"Error initializing alert plugin: {e}")
             self.alert_plugin = None
             
         try:
-            self.reporting_plugin = ReportingPlugin(connection_string)
+            self.reporting_plugin = ReportingPlugin(connection_string) if connection_string else None
         except Exception as e:
             print(f"Error initializing reporting plugin: {e}")
             self.reporting_plugin = None
         
         # Session management
         self.chat_sessions = {}
+        self.active_sessions = {}  # Add this for compatibility with frontend
         self._session_lock = asyncio.Lock()
         self._processing_locks = {}
         self._session_tasks = {}
@@ -361,18 +371,22 @@ class SurveillanceManager:
                 except Exception as e:
                     print(f"Error closing credentials: {e}")
     
-    async def process_message(self, session_id: str, user_message: str, max_iterations: int = 10):
+    async def process_message(self, message: str, session_id: str = None, max_iterations: int = 10):
         """Process a user message through the surveillance agent system.
         
         Args:
-            session_id: The session ID
-            user_message: The user's message
+            message: The user's message
+            session_id: The session ID (optional, will create new if not provided)
             max_iterations: Maximum iterations for agent conversation
             
         Returns:
-            dict: Response containing agent outputs
+            dict: Response containing agent outputs in frontend-compatible format
         """
         try:
+            # Generate session_id if not provided
+            if session_id is None:
+                session_id = str(uuid.uuid4())
+            
             # Initialize or get session
             session = await self.initialize_session(session_id)
             chat = session["chat"]
@@ -381,7 +395,7 @@ class SurveillanceManager:
             # Create user message
             msg = ChatMessageContent(
                 role=AuthorRole.USER,
-                content=user_message
+                content=message
             )
             
             # Add message to chat
@@ -399,17 +413,29 @@ class SurveillanceManager:
                 session.get("cancellation_token")
             )
             
-            # Format response
+            # Format response for frontend (matching azure structure)
+            # Combine all agent responses into a single response string
+            combined_response = ""
+            agents_involved = []
+            
+            for agent_name, response_msg in latest_responses.items():
+                if hasattr(response_msg, 'content'):
+                    agents_involved.append(agent_name)
+                    # Add agent responses with proper formatting
+                    content = response_msg.content
+                    # Remove agent name prefix if it exists
+                    if content.startswith(f"{agent_name} > "):
+                        content = content[len(f"{agent_name} > "):]
+                    combined_response += f"\n\n{content}"
+            
+            # Format final response similar to azure pattern
             response = {
                 "session_id": session_id,
                 "conversation_id": conversation_id,
-                "timestamp": datetime.now().isoformat(),
-                "agents_responses": {}
+                "response": combined_response.strip(),
+                "agents_involved": agents_involved,
+                "timestamp": datetime.now().isoformat()
             }
-            
-            for agent_name, message in latest_responses.items():
-                if hasattr(message, 'content'):
-                    response["agents_responses"][agent_name] = message.content
             
             return response
             
@@ -419,7 +445,9 @@ class SurveillanceManager:
             traceback.print_exc()
             return {
                 "error": str(e),
-                "session_id": session_id
+                "session_id": session_id,
+                "response": f"Error processing request: {str(e)}",
+                "agents_involved": []
             }
     
     async def _process_with_timeout(self, chat, latest_responses, timeout_seconds, cancellation_token=None):

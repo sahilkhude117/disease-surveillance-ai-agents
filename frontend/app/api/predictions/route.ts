@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     if (region) params.append('region', region);
     params.append('days', days);
 
-    const response = await fetch(`${API_URL}/predictions?${params.toString()}`, {
+    const response = await fetch(`${API_URL}/api/predictions?${params.toString()}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

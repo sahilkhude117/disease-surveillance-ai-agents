@@ -9,7 +9,7 @@ export async function GET(
   try {
     const sessionId = params.sessionId;
 
-    const response = await fetch(`${API_URL}/thinking-logs/${sessionId}`, {
+    const response = await fetch(`${API_URL}/api/thinking-logs/${sessionId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

@@ -4,7 +4,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export async function GET(request: NextRequest) {
   try {
-    const response = await fetch(`${API_URL}/data-sources`, {
+    const response = await fetch(`${API_URL}/api/data-sources`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

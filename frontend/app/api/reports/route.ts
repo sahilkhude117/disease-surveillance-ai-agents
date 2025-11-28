@@ -5,16 +5,16 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const region = searchParams.get('region');
-    const severity = searchParams.get('severity');
-    const status = searchParams.get('status') || 'active';
+    const sessionId = searchParams.get('session_id');
+    const reportType = searchParams.get('report_type');
+    const days = searchParams.get('days') || '30';
 
     const params = new URLSearchParams();
-    if (region) params.append('region', region);
-    if (severity) params.append('severity', severity);
-    params.append('status', status);
+    if (sessionId) params.append('session_id', sessionId);
+    if (reportType) params.append('report_type', reportType);
+    params.append('days', days);
 
-    const response = await fetch(`${API_URL}/api/alerts?${params.toString()}`, {
+    const response = await fetch(`${API_URL}/api/reports?${params.toString()}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -22,15 +22,15 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to fetch alerts');
+      throw new Error('Failed to fetch reports');
     }
 
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error('Alerts API error:', error);
+    console.error('Reports API error:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch alerts' },
+      { error: 'Failed to fetch reports' },
       { status: 500 }
     );
   }

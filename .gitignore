@@ -14,7 +14,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -55,7 +54,6 @@ htmlcov/
 # Logs
 *.log
 logs/
-reports/
 
 # Azure
 .azure/
@@ -68,5 +66,3 @@ reports/
 *.pt
 *.pth
 *.pkl
-models/
-checkpoints/
