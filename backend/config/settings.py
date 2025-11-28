@@ -2,6 +2,8 @@
 
 import os
 from dotenv import load_dotenv
+from azure.ai.projects import AIProjectClient
+from azure.identity import DefaultAzureCredential
 
 # Load environment variables from .env file
 load_dotenv()
@@ -61,3 +63,80 @@ class Settings:
 
 # Create a singleton instance
 settings = Settings()
+
+
+class AIAgentSettings:
+    """Settings for AI Agent initialization."""
+    
+    def __init__(self, connection_string: str = None, model_deployment_name: str = None):
+        """Initialize AI Agent settings.
+        
+        Args:
+            connection_string: Azure AI Project connection string
+            model_deployment_name: Model deployment name
+        """
+        self.connection_string = connection_string or settings.AZURE_AI_PROJECT_CONNECTION_STRING
+        self.model_deployment_name = model_deployment_name or settings.AZURE_AI_MODEL_DEPLOYMENT_NAME
+    
+    def validate(self):
+        """Validate settings."""
+        if not self.connection_string:
+            raise ValueError("Azure AI Project connection string is required")
+        if not self.model_deployment_name:
+            raise ValueError("Model deployment name is required")
+        return True
+
+
+def initialize_ai_agent_settings(connection_string: str = None, 
+                                 model_deployment_name: str = None) -> AIAgentSettings:
+    """Initialize AI Agent settings.
+    
+    Args:
+        connection_string: Optional connection string override
+        model_deployment_name: Optional model deployment name override
+        
+    Returns:
+        AIAgentSettings instance
+    """
+    ai_settings = AIAgentSettings(
+        connection_string=connection_string,
+        model_deployment_name=model_deployment_name
+    )
+    ai_settings.validate()
+    return ai_settings
+
+
+def get_database_connection_string() -> str:
+    """Get database connection string from settings.
+    
+    Returns:
+        Database connection string
+        
+    Raises:
+        ValueError: If connection string is not configured
+    """
+    connection_string = settings.DB_CONNECTION_STRING
+    if not connection_string:
+        raise ValueError("Database connection string is not configured. Set DB_CONNECTION_STRING environment variable.")
+    return connection_string
+
+
+def get_project_client() -> AIProjectClient:
+    """Create and return an Azure AI Project client.
+    
+    Returns:
+        AIProjectClient instance
+    """
+    connection_string = settings.AZURE_AI_PROJECT_CONNECTION_STRING
+    if not connection_string:
+        raise ValueError("Azure AI Project connection string is not configured")
+    
+    credential = DefaultAzureCredential(
+        exclude_environment_credential=True,
+        exclude_managed_identity_credential=True
+    )
+    
+    return AIProjectClient.from_connection_string(
+        conn_str=connection_string,
+        credential=credential
+    )
