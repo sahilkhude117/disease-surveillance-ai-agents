@@ -2,6 +2,7 @@
 
 import pyodbc
 import pandas as pd
+from datetime import datetime
 from typing import Optional, Dict, List, Any
 from config.settings import settings
 
@@ -128,163 +129,216 @@ class DatabaseConnection:
         self.disconnect()
 
 
-def get_surveillance_data(region: Optional[str] = None, 
+def get_surveillance_data(connection_string: str, region: Optional[str] = None, 
                          days: int = 7) -> Dict[str, pd.DataFrame]:
     """Retrieve surveillance data from database.
     
     Args:
+        connection_string: Database connection string
         region: Optional region filter
         days: Number of days of historical data to retrieve
         
     Returns:
         Dictionary of DataFrames with surveillance data by source type
     """
-    with DatabaseConnection() as db:
+    with DatabaseConnection(connection_string) as db:
         # Build WHERE clause
-        where_clause = f"WHERE timestamp >= DATEADD(day, -{days}, GETDATE())"
+        where_clause = f"WHERE created_date >= DATEADD(day, -{days}, GETDATE())"
         if region:
             where_clause += f" AND region = '{region}'"
         
+        # Note: Using try-except for each query to handle missing tables gracefully
+        result = {}
+        
         # Get hospital data
-        hospital_query = f"""
-            SELECT * FROM hospital_surveillance_data
-            {where_clause}
-            ORDER BY timestamp DESC
-        """
+        try:
+            hospital_query = f"""
+                SELECT * FROM hospital_surveillance_data
+                {where_clause}
+                ORDER BY created_date DESC
+            """
+            result['hospital'] = db.execute_query(hospital_query)
+        except Exception as e:
+            print(f"No hospital data available: {e}")
+            result['hospital'] = pd.DataFrame()
         
         # Get social media data
-        social_query = f"""
-            SELECT * FROM social_media_surveillance_data
-            {where_clause}
-            ORDER BY timestamp DESC
-        """
+        try:
+            social_query = f"""
+                SELECT * FROM social_media_surveillance_data
+                {where_clause}
+                ORDER BY created_date DESC
+            """
+            result['social_media'] = db.execute_query(social_query)
+        except Exception as e:
+            print(f"No social media data available: {e}")
+            result['social_media'] = pd.DataFrame()
         
         # Get environmental data
-        env_query = f"""
-            SELECT * FROM environmental_surveillance_data
-            {where_clause}
-            ORDER BY timestamp DESC
-        """
+        try:
+            env_query = f"""
+                SELECT * FROM environmental_surveillance_data
+                {where_clause}
+                ORDER BY created_date DESC
+            """
+            result['environmental'] = db.execute_query(env_query)
+        except Exception as e:
+            print(f"No environmental data available: {e}")
+            result['environmental'] = pd.DataFrame()
         
         # Get pharmacy data
-        pharmacy_query = f"""
-            SELECT * FROM pharmacy_surveillance_data
-            {where_clause}
-            ORDER BY timestamp DESC
-        """
+        try:
+            pharmacy_query = f"""
+                SELECT * FROM pharmacy_surveillance_data
+                {where_clause}
+                ORDER BY created_date DESC
+            """
+            result['pharmacy'] = db.execute_query(pharmacy_query)
+        except Exception as e:
+            print(f"No pharmacy data available: {e}")
+            result['pharmacy'] = pd.DataFrame()
         
-        return {
-            'hospital': db.execute_query(hospital_query),
-            'social_media': db.execute_query(social_query),
-            'environmental': db.execute_query(env_query),
-            'pharmacy': db.execute_query(pharmacy_query)
-        }
+        return result
 
 
-def save_anomaly_detection(anomalies: List[Dict[str, Any]]) -> int:
+def save_anomaly_detection(connection_string: str, anomalies: List[Dict[str, Any]], 
+                          session_id: str = None) -> int:
     """Save detected anomalies to database.
     
     Args:
+        connection_string: Database connection string
         anomalies: List of anomaly dictionaries
+        session_id: Optional session ID
         
     Returns:
         Number of rows inserted
     """
-    with DatabaseConnection() as db:
+    with DatabaseConnection(connection_string) as db:
         insert_query = """
             INSERT INTO anomaly_detections 
-            (timestamp, location, anomaly_type, severity, confidence, data_source, metrics)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (anomaly_id, timestamp, location, anomaly_type, severity, confidence, 
+             data_source, baseline_value, current_value, deviation_percent, 
+             detection_method, metrics, session_id, created_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
         """
         
         rows_affected = 0
         for anomaly in anomalies:
             params = (
+                anomaly.get('id'),
                 anomaly.get('timestamp'),
                 anomaly.get('location'),
                 anomaly.get('type'),
                 anomaly.get('severity'),
                 anomaly.get('confidence'),
                 anomaly.get('data_source'),
-                str(anomaly.get('metrics', {}))
+                anomaly.get('baseline_value'),
+                anomaly.get('current_value'),
+                anomaly.get('deviation_percent'),
+                anomaly.get('detection_method'),
+                str(anomaly.get('metrics', {})),
+                session_id
             )
-            rows_affected += db.execute_non_query(insert_query, params)
+            try:
+                rows_affected += db.execute_non_query(insert_query, params)
+            except Exception as e:
+                print(f"Error saving anomaly: {e}")
         
         return rows_affected
 
 
-def save_prediction(prediction: Dict[str, Any]) -> int:
+def save_prediction(connection_string: str, prediction_data: Dict[str, Any], 
+                   session_id: str = None) -> int:
     """Save outbreak prediction to database.
     
     Args:
-        prediction: Prediction dictionary
+        connection_string: Database connection string
+        prediction_data: Prediction data dictionary
+        session_id: Optional session ID
         
     Returns:
         Number of rows inserted
     """
-    with DatabaseConnection() as db:
+    with DatabaseConnection(connection_string) as db:
         insert_query = """
             INSERT INTO outbreak_predictions
-            (timestamp, location, outbreak_likelihood, predicted_cases, 
-             prediction_horizon_weeks, confidence_interval, model_version)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (disease_name, region, forecast_weeks, predicted_cases, confidence,
+             risk_level, model_used, prediction_json, session_id, created_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
         """
         
         params = (
-            prediction.get('timestamp'),
-            prediction.get('location'),
-            prediction.get('outbreak_likelihood'),
-            prediction.get('predicted_cases'),
-            prediction.get('horizon_weeks'),
-            str(prediction.get('confidence_interval', {})),
-            prediction.get('model_version', '1.0')
+            prediction_data.get('disease_name'),
+            prediction_data.get('region'),
+            prediction_data.get('forecast_weeks'),
+            prediction_data.get('predicted_cases'),
+            prediction_data.get('confidence'),
+            prediction_data.get('risk_level'),
+            prediction_data.get('model_used'),
+            prediction_data.get('prediction_json'),
+            session_id
         )
         
-        return db.execute_non_query(insert_query, params)
+        try:
+            return db.execute_non_query(insert_query, params)
+        except Exception as e:
+            print(f"Error saving prediction: {e}")
+            return 0
 
 
-def save_alert(alert: Dict[str, Any]) -> int:
+def save_alert(connection_string: str, alert_data: Dict[str, Any], 
+               session_id: str = None) -> int:
     """Save alert to database.
     
     Args:
-        alert: Alert dictionary
+        connection_string: Database connection string
+        alert_data: Alert data dictionary
+        session_id: Optional session ID
         
     Returns:
         Number of rows inserted
     """
-    with DatabaseConnection() as db:
+    with DatabaseConnection(connection_string) as db:
         insert_query = """
             INSERT INTO surveillance_alerts
-            (timestamp, alert_id, priority, region, target_audience, 
-             message, actions_required, dissemination_channels)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (alert_id, alert_type, severity, region, disease_name, message,
+             audience, status, alert_json, session_id, created_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
         """
         
         params = (
-            alert.get('timestamp'),
-            alert.get('id'),
-            alert.get('priority'),
-            alert.get('region'),
-            alert.get('audience'),
-            alert.get('message'),
-            str(alert.get('actions', [])),
-            str(alert.get('channels', []))
+            alert_data.get('alert_id') or f"ALERT_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            alert_data.get('alert_type'),
+            alert_data.get('severity'),
+            alert_data.get('region'),
+            alert_data.get('disease_name'),
+            alert_data.get('message'),
+            alert_data.get('audience'),
+            alert_data.get('status', 'active'),
+            alert_data.get('alert_json'),
+            session_id
         )
         
-        return db.execute_non_query(insert_query, params)
+        try:
+            return db.execute_non_query(insert_query, params)
+        except Exception as e:
+            print(f"Error saving alert: {e}")
+            return 0
 
 
-def get_thinking_logs(session_id: str, conversation_id: Optional[str] = None) -> pd.DataFrame:
+def get_thinking_logs(connection_string: str, session_id: str, 
+                     conversation_id: Optional[str] = None) -> pd.DataFrame:
     """Retrieve thinking logs for a session.
     
     Args:
+        connection_string: Database connection string
         session_id: Session ID
         conversation_id: Optional conversation ID filter
         
     Returns:
         DataFrame with thinking logs
     """
-    with DatabaseConnection() as db:
+    with DatabaseConnection(connection_string) as db:
         query = """
             SELECT * FROM agent_thinking_logs
             WHERE session_id = ?
@@ -295,6 +349,6 @@ def get_thinking_logs(session_id: str, conversation_id: Optional[str] = None) ->
             query += " AND conversation_id = ?"
             params.append(conversation_id)
         
-        query += " ORDER BY timestamp ASC"
+        query += " ORDER BY created_date ASC"
         
         return db.execute_query(query, tuple(params))
