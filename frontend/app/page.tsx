@@ -1,5 +1,14 @@
-import ChatPage from '@/app/chat/page';
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
-  return <ChatPage />;
+  const router = useRouter();
+
+  useEffect(() => {
+    router.push('/dashboard');
+  }, [router]);
+
+  return null;
 }
