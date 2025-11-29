@@ -1,6 +1,7 @@
 """Database utility functions for disease surveillance."""
 
-import pyodbc
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import pandas as pd
 from datetime import datetime
 from typing import Optional, Dict, List, Any
@@ -22,7 +23,10 @@ class DatabaseConnection:
     def connect(self):
         """Establish database connection."""
         try:
-            self.connection = pyodbc.connect(self.connection_string)
+            self.connection = psycopg2.connect(
+                self.connection_string,
+                cursor_factory=RealDictCursor
+            )
             return self.connection
         except Exception as e:
             print(f"Error connecting to database: {e}")
@@ -63,7 +67,7 @@ class DatabaseConnection:
         
         Args:
             query: SQL query to execute
-            params: Query parameters
+            params: Query parameters (use %s placeholders for PostgreSQL)
             
         Returns:
             Number of rows affected
@@ -79,7 +83,9 @@ class DatabaseConnection:
                 cursor.execute(query)
             
             self.connection.commit()
-            return cursor.rowcount
+            rowcount = cursor.rowcount
+            cursor.close()
+            return rowcount
         except Exception as e:
             print(f"Error executing non-query: {e}")
             if self.connection:
@@ -87,36 +93,40 @@ class DatabaseConnection:
             raise
     
     def execute_stored_procedure(self, proc_name: str, params: tuple = None) -> pd.DataFrame:
-        """Execute a stored procedure and return results.
+        """Execute a PostgreSQL function and return results.
         
         Args:
-            proc_name: Name of stored procedure
-            params: Procedure parameters
+            proc_name: Name of PostgreSQL function
+            params: Function parameters
             
         Returns:
-            DataFrame with procedure results
+            DataFrame with function results
         """
         try:
             if not self.connection:
                 self.connect()
             
             cursor = self.connection.cursor()
+            # PostgreSQL function call syntax
             if params:
-                cursor.execute(f"EXEC {proc_name} {','.join(['?' for _ in params])}", params)
+                placeholders = ','.join(['%s' for _ in params])
+                cursor.execute(f"SELECT * FROM {proc_name}({placeholders})", params)
             else:
-                cursor.execute(f"EXEC {proc_name}")
+                cursor.execute(f"SELECT * FROM {proc_name}()")
             
             # Fetch results if available
             try:
                 columns = [column[0] for column in cursor.description]
                 rows = cursor.fetchall()
                 df = pd.DataFrame.from_records(rows, columns=columns)
+                cursor.close()
                 return df
             except:
                 # No results to fetch
+                cursor.close()
                 return pd.DataFrame()
         except Exception as e:
-            print(f"Error executing stored procedure: {e}")
+            print(f"Error executing PostgreSQL function: {e}")
             raise
     
     def __enter__(self):
@@ -142,8 +152,8 @@ def get_surveillance_data(connection_string: str, region: Optional[str] = None,
         Dictionary of DataFrames with surveillance data by source type
     """
     with DatabaseConnection(connection_string) as db:
-        # Build WHERE clause
-        where_clause = f"WHERE created_date >= DATEADD(day, -{days}, GETDATE())"
+        # Build WHERE clause (PostgreSQL syntax)
+        where_clause = f"WHERE created_date >= NOW() - INTERVAL '{days} days'"
         if region:
             where_clause += f" AND region = '{region}'"
         
@@ -214,18 +224,18 @@ def save_anomaly_detection(connection_string: str, anomalies: List[Dict[str, Any
         Number of rows inserted
     """
     with DatabaseConnection(connection_string) as db:
+        # PostgreSQL uses %s placeholders and NOW() instead of GETDATE()
         insert_query = """
             INSERT INTO anomaly_detections 
-            (anomaly_id, timestamp, location, anomaly_type, severity, confidence, 
+            (timestamp, location, anomaly_type, severity, confidence, 
              data_source, baseline_value, current_value, deviation_percent, 
              detection_method, metrics, session_id, created_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
         """
         
         rows_affected = 0
         for anomaly in anomalies:
             params = (
-                anomaly.get('id'),
                 anomaly.get('timestamp'),
                 anomaly.get('location'),
                 anomaly.get('type'),
@@ -260,11 +270,12 @@ def save_prediction(connection_string: str, prediction_data: Dict[str, Any],
         Number of rows inserted
     """
     with DatabaseConnection(connection_string) as db:
+        # PostgreSQL uses %s placeholders and NOW()
         insert_query = """
             INSERT INTO outbreak_predictions
             (disease_name, region, forecast_weeks, predicted_cases, confidence,
              risk_level, model_used, prediction_json, session_id, created_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
         """
         
         params = (
@@ -299,11 +310,12 @@ def save_alert(connection_string: str, alert_data: Dict[str, Any],
         Number of rows inserted
     """
     with DatabaseConnection(connection_string) as db:
+        # PostgreSQL uses %s placeholders and NOW()
         insert_query = """
             INSERT INTO surveillance_alerts
             (alert_id, alert_type, severity, region, disease_name, message,
              audience, status, alert_json, session_id, created_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
         """
         
         params = (
@@ -339,14 +351,15 @@ def get_thinking_logs(connection_string: str, session_id: str,
         DataFrame with thinking logs
     """
     with DatabaseConnection(connection_string) as db:
+        # PostgreSQL uses %s placeholders
         query = """
             SELECT * FROM agent_thinking_logs
-            WHERE session_id = ?
+            WHERE session_id = %s
         """
         params = [session_id]
         
         if conversation_id:
-            query += " AND conversation_id = ?"
+            query += " AND conversation_id = %s"
             params.append(conversation_id)
         
         query += " ORDER BY created_date ASC"
