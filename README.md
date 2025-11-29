@@ -15,7 +15,7 @@ Instead of waiting for doctors and hospitals to manually report cases, our AI ag
 
 ## System Architecture
 
-![Alt text](./data/public/architecture.png)
+![Alt text](./data/public/architecture.jpg)
 
 
 ## Core Logic: LangGraph Multi-Agent Orchestration
