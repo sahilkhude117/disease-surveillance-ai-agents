@@ -2,7 +2,6 @@
 
 import json
 from datetime import datetime, timedelta
-from semantic_kernel.functions.kernel_function_decorator import kernel_function
 from utils.database_utils import get_surveillance_data
 from utils.data_processing import (
     aggregate_hospital_data,
@@ -18,7 +17,6 @@ class DataCollectionPlugin:
     def __init__(self, connection_string):
         self.connection_string = connection_string
     
-    @kernel_function(description="Get all surveillance data sources for disease monitoring")
     def get_health_data_sources(self, days: int = 7, region: str = None) -> str:
         """Retrieves and aggregates surveillance data from all sources.
         
@@ -105,7 +103,6 @@ class DataCollectionPlugin:
                 "status": "data_collection_failed"
             })
     
-    @kernel_function(description="Get hospital surveillance data specifically")
     def get_hospital_data(self, days: int = 7, region: str = None) -> str:
         """Retrieves hospital surveillance data only.
         
@@ -136,7 +133,6 @@ class DataCollectionPlugin:
             print(f"Error in get_hospital_data: {e}")
             return json.dumps({"error": str(e)})
     
-    @kernel_function(description="Get social media surveillance data")
     def get_social_media_data(self, days: int = 7, region: str = None) -> str:
         """Retrieves social media surveillance data only.
         
@@ -167,7 +163,6 @@ class DataCollectionPlugin:
             print(f"Error in get_social_media_data: {e}")
             return json.dumps({"error": str(e)})
     
-    @kernel_function(description="Get environmental surveillance data")
     def get_environmental_data(self, days: int = 7, region: str = None) -> str:
         """Retrieves environmental surveillance data only.
         
@@ -198,7 +193,6 @@ class DataCollectionPlugin:
             print(f"Error in get_environmental_data: {e}")
             return json.dumps({"error": str(e)})
     
-    @kernel_function(description="Get pharmacy surveillance data")
     def get_pharmacy_data(self, days: int = 7, region: str = None) -> str:
         """Retrieves pharmacy surveillance data only.
         
@@ -229,8 +223,7 @@ class DataCollectionPlugin:
             print(f"Error in get_pharmacy_data: {e}")
             return json.dumps({"error": str(e)})
     
-    @kernel_function(description="Check data source availability and status")
-    def check_data_source_status(self) -> str:
+    def check_data_sources(self) -> str:
         """Checks the status and availability of all data sources.
         
         Returns:

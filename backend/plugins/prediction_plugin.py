@@ -2,7 +2,6 @@
 
 import json
 from datetime import datetime, timedelta
-from semantic_kernel.functions.kernel_function_decorator import kernel_function
 from utils.database_utils import save_prediction
 import numpy as np
 
@@ -13,7 +12,6 @@ class PredictionPlugin:
     def __init__(self, connection_string):
         self.connection_string = connection_string
     
-    @kernel_function(description="Predict disease spread for specified time horizon")
     def predict_disease_spread(self, disease_name: str, region: str, 
                               horizon_weeks: int = 2, model_type: str = "auto") -> str:
         """Predicts disease spread using epidemiological models.
@@ -175,11 +173,10 @@ class PredictionPlugin:
                 "Track hospital admission rates daily",
                 "Monitor ICU capacity utilization",
                 "Analyze social media sentiment for compliance"
-            ]
+            ])
         }
     
-    @kernel_function(description="Get recent predictions from database")
-    def get_recent_predictions(self, days: int = 7, disease: str = None, 
+    def get_recent_predictions(self, days: int = 7, disease: str = None,
                               region: str = None) -> str:
         """Retrieves recent predictions from the database.
         
@@ -192,38 +189,38 @@ class PredictionPlugin:
             JSON string with recent predictions
         """
         try:
-            import pyodbc
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
             
-            conn = pyodbc.connect(self.connection_string)
-            cursor = conn.cursor()
+            conn = psycopg2.connect(self.connection_string)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             query = """
                 SELECT 
-                    prediction_id, disease_name, region, forecast_weeks,
+                    id as prediction_id, disease_name, region, forecast_weeks,
                     predicted_cases, confidence, risk_level, model_used,
                     prediction_json, created_date
                 FROM outbreak_predictions
-                WHERE created_date >= DATEADD(day, -?, GETDATE())
+                WHERE created_date >= NOW() - INTERVAL '%s days'
             """
             params = [days]
             
             if disease:
-                query += " AND disease_name = ?"
+                query += " AND disease_name = %s"
                 params.append(disease)
             
             if region:
-                query += " AND region = ?"
+                query += " AND region = %s"
                 params.append(region)
             
             query += " ORDER BY created_date DESC"
             
             cursor.execute(query, params)
-            columns = [column[0] for column in cursor.description]
             rows = cursor.fetchall()
             
             predictions = []
             for row in rows:
-                predictions.append(dict(zip(columns, row)))
+                predictions.append(dict(row))
             
             cursor.close()
             conn.close()
@@ -245,7 +242,6 @@ class PredictionPlugin:
             print(f"Error in get_recent_predictions: {e}")
             return json.dumps({"error": str(e)})
     
-    @kernel_function(description="Calculate epidemic reproductive number (R0)")
     def calculate_reproductive_number(self, disease_name: str, region: str, 
                                      days: int = 14) -> str:
         """Calculates the epidemic reproductive number (R0).

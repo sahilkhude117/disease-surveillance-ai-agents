@@ -2,7 +2,6 @@
 
 import json
 from datetime import datetime
-from semantic_kernel.functions.kernel_function_decorator import kernel_function
 from models.anomaly_detector import AnomalyDetector
 from utils.database_utils import get_surveillance_data, save_anomaly_detection
 from utils.data_processing import calculate_baseline_statistics
@@ -15,7 +14,6 @@ class AnomalyDetectionPlugin:
         self.connection_string = connection_string
         self.detector = AnomalyDetector(threshold=0.75)
     
-    @kernel_function(description="Detect anomalies in surveillance data using multiple methods")
     def detect_anomalies(self, days: int = 7, region: str = None, 
                         detection_method: str = "all") -> str:
         """Detects anomalies in disease surveillance data.
@@ -133,7 +131,6 @@ class AnomalyDetectionPlugin:
                 "status": "anomaly_detection_failed"
             })
     
-    @kernel_function(description="Detect anomalies using statistical methods only")
     def detect_statistical_anomalies(self, days: int = 7, region: str = None,
                                     method: str = "zscore") -> str:
         """Detects anomalies using statistical methods (Z-score, IQR, Modified Z-score).
@@ -148,7 +145,6 @@ class AnomalyDetectionPlugin:
         """
         return self.detect_anomalies(days, region, "statistical")
     
-    @kernel_function(description="Detect anomalies using machine learning")
     def detect_ml_anomalies(self, days: int = 7, region: str = None) -> str:
         """Detects anomalies using ML-based Isolation Forest.
         
@@ -161,7 +157,6 @@ class AnomalyDetectionPlugin:
         """
         return self.detect_anomalies(days, region, "ml")
     
-    @kernel_function(description="Detect temporal patterns and trends")
     def detect_temporal_anomalies(self, days: int = 7, region: str = None) -> str:
         """Detects temporal anomalies like rapid increases or sustained trends.
         
@@ -174,7 +169,6 @@ class AnomalyDetectionPlugin:
         """
         return self.detect_anomalies(days, region, "temporal")
     
-    @kernel_function(description="Get recent anomaly detections from database")
     def get_recent_anomalies(self, days: int = 7, severity: str = None, 
                             region: str = None) -> str:
         """Retrieves recent anomaly detections from the database.
@@ -188,10 +182,11 @@ class AnomalyDetectionPlugin:
             JSON string with recent anomalies
         """
         try:
-            import pyodbc
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
             
-            conn = pyodbc.connect(self.connection_string)
-            cursor = conn.cursor()
+            conn = psycopg2.connect(self.connection_string)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             # Build query with filters
             query = """
@@ -200,27 +195,26 @@ class AnomalyDetectionPlugin:
                     confidence, data_source, baseline_value, current_value,
                     deviation_percent, detection_method, metrics, created_date
                 FROM anomaly_detections
-                WHERE created_date >= DATEADD(day, -?, GETDATE())
+                WHERE created_date >= NOW() - INTERVAL '%s days'
             """
             params = [days]
             
             if severity:
-                query += " AND severity = ?"
+                query += " AND severity = %s"
                 params.append(severity)
             
             if region:
-                query += " AND location LIKE ?"
+                query += " AND location LIKE %s"
                 params.append(f"%{region}%")
             
             query += " ORDER BY created_date DESC, confidence DESC"
             
             cursor.execute(query, params)
-            columns = [column[0] for column in cursor.description]
             rows = cursor.fetchall()
             
             anomalies = []
             for row in rows:
-                anomalies.append(dict(zip(columns, row)))
+                anomalies.append(dict(row))
             
             cursor.close()
             conn.close()
@@ -242,7 +236,6 @@ class AnomalyDetectionPlugin:
             print(f"Error in get_recent_anomalies: {e}")
             return json.dumps({"error": str(e)})
     
-    @kernel_function(description="Update anomaly detector baseline")
     def update_baseline(self, lookback_weeks: int = 8, region: str = None) -> str:
         """Updates the baseline statistics for anomaly detection.
         

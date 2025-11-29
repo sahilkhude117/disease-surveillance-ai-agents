@@ -1,56 +1,65 @@
-"""Reporting plugin for generating disease surveillance reports."""
+"""Reporting plugin for generating disease surveillance reports.
+
+MIGRATED FROM AZURE:
+- Replaced Azure Blob Storage with local file storage and optional Supabase Storage
+- Removed semantic_kernel dependency
+- Uses simple file-based storage for hackathon demo
+"""
 
 import json
 import uuid
 import os
-import pyodbc
 import tempfile
 from datetime import datetime
-from semantic_kernel.functions.kernel_function_decorator import kernel_function
+from pathlib import Path
 
-# Import Azure storage modules
+# Optional: Supabase storage support
 try:
-    from azure.storage.blob import BlobServiceClient, ContentSettings
-    AZURE_STORAGE_AVAILABLE = True
+    from supabase import create_client, Client
+    from config.settings import settings
+    SUPABASE_STORAGE_AVAILABLE = settings.is_supabase_configured()
 except ImportError:
-    print("Azure Storage SDK not available. Uploads will not work.")
-    AZURE_STORAGE_AVAILABLE = False
+    SUPABASE_STORAGE_AVAILABLE = False
+    print("⚠️  Supabase not available. Using local storage only.")
 
 
 class ReportingPlugin:
     """Plugin for creating and managing surveillance reports."""
     
-    def __init__(self, connection_string, storage_connection_string=None):
+    def __init__(self, connection_string, storage_type=None):
         """Initialize the reporting plugin.
         
         Args:
             connection_string: Database connection string
-            storage_connection_string: Optional Azure Storage connection string
+            storage_type: Optional storage type ('local' or 'supabase')
         """
         self.connection_string = connection_string
-        self.storage_connection_string = storage_connection_string or os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-        self.storage_container = os.getenv("AZURE_STORAGE_CONTAINER", "disease-surveillance-reports")
-        self.report_directory = os.getenv("REPORT_STORAGE_PATH", "reports")
+        self.storage_type = storage_type or os.getenv("REPORT_STORAGE_TYPE", "local")
+        self.report_directory = os.getenv("REPORT_STORAGE_PATH", "./reports")
         
         # Create report directory if it doesn't exist
         try:
-            if not os.path.exists(self.report_directory):
-                os.makedirs(self.report_directory)
-                print(f"Created report directory: {self.report_directory}")
+            Path(self.report_directory).mkdir(parents=True, exist_ok=True)
+            print(f"✅ Report directory ready: {self.report_directory}")
         except Exception as e:
-            print(f"Error creating report directory: {e}")
+            print(f"⚠️  Error creating report directory: {e}")
             self.report_directory = "."
         
-        # Initialize blob service client
-        self.blob_service_client = None
-        if AZURE_STORAGE_AVAILABLE and self.storage_connection_string:
+        # Initialize Supabase client if configured
+        self.supabase_client = None
+        self.supabase_bucket = None
+        if SUPABASE_STORAGE_AVAILABLE and self.storage_type == "supabase":
             try:
-                self.blob_service_client = BlobServiceClient.from_connection_string(self.storage_connection_string)
-                print("Initialized blob service client from connection string")
+                from config.settings import get_supabase_client, settings
+                self.supabase_client = get_supabase_client()
+                self.supabase_bucket = settings.SUPABASE_STORAGE_BUCKET
+                print(f"✅ Supabase storage initialized: {self.supabase_bucket}")
             except Exception as e:
-                print(f"Error initializing blob service client: {e}")
+                print(f"⚠️  Supabase storage not available, using local: {e}")
+                self.storage_type = "local"
+        else:
+            print(f"📁 Using local file storage: {self.report_directory}")
     
-    @kernel_function(description="Save a surveillance report to file and upload to storage")
     def save_surveillance_report(self, report_content: str, session_id: str, 
                                 conversation_id: str, report_title: str = None,
                                 report_type: str = "comprehensive") -> str:
@@ -202,33 +211,18 @@ class ReportingPlugin:
             report_type: The type of report
         """
         try:
-            conn = pyodbc.connect(self.connection_string)
+            import psycopg2
+            conn = psycopg2.connect(self.connection_string)
             cursor = conn.cursor()
             
-            # Try stored procedure first
-            try:
-                cursor.execute("""
-                    EXEC sp_LogSurveillanceReport 
-                        @session_id = ?,
-                        @conversation_id = ?,
-                        @filename = ?,
-                        @blob_url = ?,
-                        @report_type = ?
-                """, (session_id, conversation_id, filename, blob_url, report_type))
-                
-                conn.commit()
-                print("Successfully logged report using stored procedure")
-                
-            except Exception as sp_error:
-                print(f"Error executing stored procedure: {sp_error}")
-                
-                # Try direct insert as fallback
-                cursor.execute("""
-                    INSERT INTO surveillance_reports (
-                        session_id, conversation_id, filename,
-                        blob_url, report_type, created_date
-                    )
-                    VALUES (?, ?, ?, ?, ?, GETDATE())
+            # PostgreSQL doesn't use stored procedures the same way
+            # Use direct insert
+            cursor.execute("""
+                INSERT INTO surveillance_reports (
+                    session_id, conversation_id, filename,
+                    blob_url, report_type, created_date
+                )
+                VALUES (%s, %s, %s, %s, %s, NOW())
                 """, (session_id, conversation_id, filename, blob_url, report_type))
                 
                 conn.commit()
@@ -244,7 +238,6 @@ class ReportingPlugin:
             traceback.print_exc()
             return False
     
-    @kernel_function(description="Get all available surveillance reports")
     def get_reports(self, session_id: str = None, conversation_id: str = None,
                    report_type: str = None, days: int = 30) -> str:
         """Gets surveillance reports with optional filtering.
@@ -259,19 +252,22 @@ class ReportingPlugin:
             JSON string with the reports
         """
         try:
-            conn = pyodbc.connect(self.connection_string)
-            cursor = conn.cursor()
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+            
+            conn = psycopg2.connect(self.connection_string)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             # Build query parameters
             params = [days]
-            where_clauses = ["created_date >= DATEADD(day, -?, GETDATE())"]
+            where_clauses = ["created_date >= NOW() - INTERVAL '%s days'"]
             
             if session_id:
-                where_clauses.append("session_id = ?")
+                where_clauses.append("session_id = %s")
                 params.append(session_id)
                 
             if conversation_id:
-                where_clauses.append("conversation_id = ?")
+                where_clauses.append("conversation_id = %s")
                 params.append(conversation_id)
             
             if report_type:
@@ -323,7 +319,6 @@ class ReportingPlugin:
             traceback.print_exc()
             return json.dumps({"error": str(e)})
     
-    @kernel_function(description="Generate report from conversation history")
     def generate_report_from_conversation(self, conversation_id: str, 
                                          session_id: str,
                                          report_type: str = "comprehensive") -> str:
@@ -339,15 +334,18 @@ class ReportingPlugin:
         """
         try:
             # Retrieve thinking logs from database
-            conn = pyodbc.connect(self.connection_string)
-            cursor = conn.cursor()
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+            
+            conn = psycopg2.connect(self.connection_string)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             cursor.execute("""
                 SELECT 
                     agent_name, thinking_stage, thought_content,
                     agent_output, user_query, created_date
                 FROM agent_thinking_logs
-                WHERE conversation_id = ?
+                WHERE conversation_id = %s
                 ORDER BY created_date
             """, (conversation_id,))
             

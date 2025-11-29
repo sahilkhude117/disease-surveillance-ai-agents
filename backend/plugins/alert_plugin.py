@@ -2,7 +2,6 @@
 
 import json
 from datetime import datetime
-from semantic_kernel.functions.kernel_function_decorator import kernel_function
 from utils.database_utils import save_alert
 
 
@@ -12,7 +11,6 @@ class AlertPlugin:
     def __init__(self, connection_string):
         self.connection_string = connection_string
     
-    @kernel_function(description="Generate a disease surveillance alert")
     def generate_alert(self, alert_type: str, severity: str, region: str,
                       disease_name: str, message: str, audience: str = "all") -> str:
         """Generates a disease surveillance alert.
@@ -244,7 +242,6 @@ Contact school health coordinator for guidance.
         
         return messages
     
-    @kernel_function(description="Get active alerts from database")
     def get_active_alerts(self, region: str = None, severity: str = None, 
                          disease: str = None) -> str:
         """Retrieves active alerts from the database.
@@ -258,10 +255,11 @@ Contact school health coordinator for guidance.
             JSON string with active alerts
         """
         try:
-            import pyodbc
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
             
-            conn = pyodbc.connect(self.connection_string)
-            cursor = conn.cursor()
+            conn = psycopg2.connect(self.connection_string)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             query = """
                 SELECT 
@@ -273,26 +271,25 @@ Contact school health coordinator for guidance.
             params = []
             
             if region:
-                query += " AND region = ?"
+                query += " AND region = %s"
                 params.append(region)
             
             if severity:
-                query += " AND severity = ?"
+                query += " AND severity = %s"
                 params.append(severity)
             
             if disease:
-                query += " AND disease_name = ?"
+                query += " AND disease_name = %s"
                 params.append(disease)
             
             query += " ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, created_date DESC"
             
             cursor.execute(query, params)
-            columns = [column[0] for column in cursor.description]
             rows = cursor.fetchall()
             
             alerts = []
             for row in rows:
-                alerts.append(dict(zip(columns, row)))
+                alerts.append(dict(row))
             
             cursor.close()
             conn.close()
@@ -320,7 +317,6 @@ Contact school health coordinator for guidance.
             print(f"Error in get_active_alerts: {e}")
             return json.dumps({"error": str(e)})
     
-    @kernel_function(description="Update alert status")
     def update_alert_status(self, alert_id: str, new_status: str, 
                            notes: str = None) -> str:
         """Updates the status of an alert.
@@ -334,16 +330,16 @@ Contact school health coordinator for guidance.
             JSON string with update result
         """
         try:
-            import pyodbc
+            import psycopg2
             
-            conn = pyodbc.connect(self.connection_string)
+            conn = psycopg2.connect(self.connection_string)
             cursor = conn.cursor()
             
             cursor.execute("""
                 UPDATE surveillance_alerts
-                SET status = ?, 
-                    updated_date = GETDATE()
-                WHERE alert_id = ?
+                SET status = %s, 
+                    updated_date = NOW()
+                WHERE alert_id = %s
             """, (new_status, alert_id))
             
             rows_affected = cursor.rowcount

@@ -2,9 +2,6 @@
 
 import json
 import uuid
-import pyodbc
-from semantic_kernel.functions.kernel_function_decorator import kernel_function
-from azure.ai.projects import AIProjectClient
 
 
 class LoggingPlugin:
@@ -16,7 +13,6 @@ class LoggingPlugin:
         self._current_agent_id = None
         self._current_thread_id = None
     
-    @kernel_function(description="Get the current agent's ID")
     def log_agent_get_agent_id(self) -> str:
         """Retrieves the current agent's ID from context.
         
@@ -42,7 +38,6 @@ class LoggingPlugin:
         except Exception as e:
             print(f"Error in set_agent_id: {e}")
     
-    @kernel_function(description="Retrieve agent thread id")
     def log_agent_get_thread_id(self) -> str:
         """Retrieves the latest thread ID.
     
@@ -93,7 +88,6 @@ class LoggingPlugin:
             print(f"Error getting thread ID: {e}")
             return "thread_id_error"
     
-    @kernel_function(description="Log the agent's thinking process for disease surveillance with improved error handling")
     def log_agent_thinking(self, agent_name: str, thinking_stage: str, thought_content: str, 
                         conversation_id: str = None, session_id: str = None, 
                         azure_agent_id: str = None, model_deployment_name: str = None,
@@ -122,7 +116,6 @@ class LoggingPlugin:
         try:
             import json
             import uuid
-            import pyodbc
             
             # Generate conversation_id if not provided
             if not conversation_id:
@@ -170,16 +163,17 @@ class LoggingPlugin:
                 agent_output = agent_output[:max_text_length] + "... [TRUNCATED]"
             
             try:
-                conn = pyodbc.connect(self.connection_string)
+                import psycopg2
+                conn = psycopg2.connect(self.connection_string)
                 cursor = conn.cursor()
                 
                 # Insert into agent_thinking_logs table
                 cursor.execute("""
                     INSERT INTO agent_thinking_logs
                     (agent_name, thinking_stage, thought_content, thinking_stage_output, agent_output, 
-                    conversation_id, session_id, azure_agent_id, model_deployment_name, thread_id,
+                    conversation_id, session_id, agent_id, model_deployment_name, thread_id,
                     user_query, status, created_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 """, (agent_name, thinking_stage, thought_content, thinking_stage_output, agent_output, 
                       conversation_id, session_id, azure_agent_id, model_deployment_name, thread_id,
                       user_query, status))
@@ -219,7 +213,6 @@ class LoggingPlugin:
             except:
                 return '{"error": "Unknown error in log_agent_thinking"}'
 
-    @kernel_function(description="Log the complete agent response")
     def log_agent_response(self, agent_name: str, response_content: str, 
                            conversation_id: str = None, session_id: str = None,
                            azure_agent_id: str = None, model_deployment_name: str = None,
@@ -239,7 +232,6 @@ class LoggingPlugin:
             thinking_stage_output=response_content
         )
     
-    @kernel_function(description="Log an error that occurred during agent thinking")
     def log_agent_error(self, agent_name: str, error_type: str, error_message: str,
                       conversation_id: str = None, session_id: str = None,
                       azure_agent_id: str = None, model_deployment_name: str = None,
