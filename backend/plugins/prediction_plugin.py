@@ -173,7 +173,7 @@ class PredictionPlugin:
                 "Track hospital admission rates daily",
                 "Monitor ICU capacity utilization",
                 "Analyze social media sentiment for compliance"
-            ])
+            ]
         }
     
     def get_recent_predictions(self, days: int = 7, disease: str = None,

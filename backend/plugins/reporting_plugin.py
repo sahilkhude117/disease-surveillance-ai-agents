@@ -224,9 +224,9 @@ class ReportingPlugin:
                 )
                 VALUES (%s, %s, %s, %s, %s, NOW())
                 """, (session_id, conversation_id, filename, blob_url, report_type))
-                
-                conn.commit()
-                print("Successfully inserted report using direct SQL")
+            
+            conn.commit()
+            print("Successfully inserted report using direct SQL")
             
             cursor.close()
             conn.close()

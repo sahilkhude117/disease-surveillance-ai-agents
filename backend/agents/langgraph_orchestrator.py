@@ -16,7 +16,7 @@ from datetime import datetime
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-from langchain.tools import Tool
+from langchain_core.tools import Tool
 from dotenv import load_dotenv
 
 # Import existing plugins
