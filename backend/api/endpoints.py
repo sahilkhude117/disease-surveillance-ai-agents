@@ -12,6 +12,7 @@ from datetime import datetime
 
 from managers.surveillance_manager import SurveillanceManager
 from utils.database_utils import DatabaseConnection
+from utils.query_helpers import fetch_results_as_dicts
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -125,30 +126,42 @@ async def get_surveillance_status():
         # Get active sessions count
         active_sessions = len(manager.active_sessions)
         
-        # Query database for metrics
-        with DatabaseConnection() as conn:
-            cursor = conn.cursor()
-            
-            # Count anomalies (last 24 hours)
-            cursor.execute("""
-                SELECT COUNT(*) FROM anomaly_detections 
-                WHERE timestamp >= DATEADD(hour, -24, GETDATE())
-            """)
-            total_anomalies = cursor.fetchone()[0]
-            
-            # Count active alerts
-            cursor.execute("""
-                SELECT COUNT(*) FROM surveillance_alerts 
-                WHERE status = 'active'
-            """)
-            active_alerts = cursor.fetchone()[0]
-            
-            # Count recent predictions (last 24 hours)
-            cursor.execute("""
-                SELECT COUNT(*) FROM outbreak_predictions 
-                WHERE created_date >= DATEADD(hour, -24, GETDATE())
-            """)
-            recent_predictions = cursor.fetchone()[0]
+        # Query database for metrics with fallback for connection issues
+        try:
+            with DatabaseConnection() as db:
+                cursor = db.connection.cursor()
+                
+                # Count anomalies (last 24 hours) - PostgreSQL syntax
+                cursor.execute("""
+                    SELECT COUNT(*) as count FROM anomaly_detections 
+                    WHERE timestamp >= NOW() - INTERVAL '24 hours'
+                """)
+                result = cursor.fetchone()
+                total_anomalies = result['count'] if result else 0
+                
+                # Count active alerts
+                cursor.execute("""
+                    SELECT COUNT(*) as count FROM surveillance_alerts 
+                    WHERE status = 'active'
+                """)
+                result = cursor.fetchone()
+                active_alerts = result['count'] if result else 0
+                
+                # Count recent predictions (last 24 hours) - PostgreSQL syntax
+                cursor.execute("""
+                    SELECT COUNT(*) as count FROM outbreak_predictions 
+                    WHERE created_date >= NOW() - INTERVAL '24 hours'
+                """)
+                result = cursor.fetchone()
+                recent_predictions = result['count'] if result else 0
+                
+                cursor.close()
+        except Exception as db_error:
+            logger.warning(f"Database query failed, returning zeros: {db_error}")
+            # Return zeros if database is unavailable
+            total_anomalies = 0
+            active_alerts = 0
+            recent_predictions = 0
         
         return JSONResponse(
             status_code=200,
@@ -190,44 +203,52 @@ async def get_anomalies(
     - Temporal anomalies
     """
     try:
-        with DatabaseConnection() as conn:
-            cursor = conn.cursor()
+        db = DatabaseConnection()
+        db.connect()
+        cursor = db.connection.cursor()
+        
+        # Build query with filters - PostgreSQL syntax
+        # Note: Using direct string interpolation for days since INTERVAL doesn't support parameterization
+        # days is validated by FastAPI (ge=1, le=90) so this is safe
+        query = f"""
+            SELECT 
+                anomaly_id,
+                timestamp,
+                location as region,
+                anomaly_type,
+                severity,
+                confidence,
+                data_source,
+                baseline_value,
+                current_value,
+                deviation_percent,
+                detection_method
+            FROM anomaly_detections
+            WHERE timestamp >= NOW() - INTERVAL '{days} days'
+        """
+        params = []
             
-            # Build query with filters
-            query = """
-                SELECT 
-                    anomaly_id,
-                    timestamp,
-                    region,
-                    anomaly_type,
-                    severity,
-                    confidence,
-                    data_source,
-                    baseline_value,
-                    current_value,
-                    deviation_percent,
-                    detection_method
-                FROM anomaly_detections
-                WHERE timestamp >= DATEADD(day, -?, GETDATE())
-            """
-            params = [days]
-            
-            if region:
-                query += " AND region = ?"
-                params.append(region)
-            
-            if severity:
-                query += " AND severity = ?"
-                params.append(severity)
-            
-            query += " ORDER BY timestamp DESC, severity DESC"
-            
-            cursor.execute(query, params)
-            columns = [column[0] for column in cursor.description]
-            results = []
-            
-            for row in cursor.fetchall():
-                results.append(dict(zip(columns, row)))
+        if region:
+            query += " AND location = %s"
+            params.append(region)
+        
+        if severity:
+            query += " AND severity = %s"
+            params.append(severity)
+        
+        query += " ORDER BY timestamp DESC, severity DESC"
+        
+        cursor.execute(query, tuple(params))
+        # RealDictCursor returns dictionaries directly
+        results = cursor.fetchall()
+        # Convert to regular dicts and handle datetime serialization
+        results = [
+            {k: v.isoformat() if hasattr(v, 'isoformat') else v for k, v in dict(row).items()}
+            for row in results
+        ]
+        
+        cursor.close()
+        db.disconnect()
         
         return JSONResponse(
             status_code=200,
@@ -266,41 +287,49 @@ async def get_predictions(
     - Model parameters (R0, growth rate, etc.)
     """
     try:
-        with DatabaseConnection() as conn:
-            cursor = conn.cursor()
+        db = DatabaseConnection()
+        db.connect()
+        cursor = db.connection.cursor()
+        
+        # Note: Using direct string interpolation for days since INTERVAL doesn't support parameterization
+        # days is validated by FastAPI (ge=1, le=180) so this is safe
+        query = f"""
+            SELECT 
+                prediction_id,
+                disease_name,
+                region,
+                forecast_weeks,
+                predicted_cases,
+                confidence,
+                risk_level,
+                model_used,
+                created_date
+            FROM outbreak_predictions
+            WHERE created_date >= NOW() - INTERVAL '{days} days'
+        """
+        params = []
             
-            query = """
-                SELECT 
-                    prediction_id,
-                    disease_name,
-                    region,
-                    forecast_weeks,
-                    predicted_cases,
-                    confidence,
-                    risk_level,
-                    model_used,
-                    created_date
-                FROM outbreak_predictions
-                WHERE created_date >= DATEADD(day, -?, GETDATE())
-            """
-            params = [days]
-            
-            if disease:
-                query += " AND disease_name = ?"
-                params.append(disease)
-            
-            if region:
-                query += " AND region = ?"
-                params.append(region)
-            
-            query += " ORDER BY created_date DESC, risk_level DESC"
-            
-            cursor.execute(query, params)
-            columns = [column[0] for column in cursor.description]
-            results = []
-            
-            for row in cursor.fetchall():
-                results.append(dict(zip(columns, row)))
+        if disease:
+            query += " AND disease_name = %s"
+            params.append(disease)
+        
+        if region:
+            query += " AND region = %s"
+            params.append(region)
+        
+        query += " ORDER BY created_date DESC, risk_level DESC"
+        
+        cursor.execute(query, tuple(params))
+        # RealDictCursor returns dictionaries directly
+        results = cursor.fetchall()
+        # Convert to regular dicts and handle datetime serialization
+        results = [
+            {k: v.isoformat() if hasattr(v, 'isoformat') else v for k, v in dict(row).items()}
+            for row in results
+        ]
+        
+        cursor.close()
+        db.disconnect()
         
         return JSONResponse(
             status_code=200,
@@ -339,50 +368,56 @@ async def get_alerts(
     - Schools and institutions
     """
     try:
-        with DatabaseConnection() as conn:
-            cursor = conn.cursor()
+        db = DatabaseConnection()
+        db.connect()
+        cursor = db.connection.cursor()
+        
+        query = """
+            SELECT 
+                alert_id,
+                alert_type,
+                severity,
+                region,
+                disease_name,
+                message,
+                audience,
+                status,
+                created_date
+            FROM surveillance_alerts
+            WHERE status = %s
+        """
+        params = [status]
             
-            query = """
-                SELECT 
-                    alert_id,
-                    alert_type,
-                    severity,
-                    region,
-                    disease_name,
-                    message,
-                    audience,
-                    status,
-                    created_date
-                FROM surveillance_alerts
-                WHERE status = ?
-            """
-            params = [status]
-            
-            if region:
-                query += " AND region = ?"
-                params.append(region)
-            
-            if severity:
-                query += " AND severity = ?"
-                params.append(severity)
-            
-            query += """ ORDER BY 
-                CASE severity
-                    WHEN 'critical' THEN 1
-                    WHEN 'high' THEN 2
-                    WHEN 'medium' THEN 3
-                    WHEN 'low' THEN 4
-                    ELSE 5
-                END,
-                created_date DESC
-            """
-            
-            cursor.execute(query, params)
-            columns = [column[0] for column in cursor.description]
-            results = []
-            
-            for row in cursor.fetchall():
-                results.append(dict(zip(columns, row)))
+        if region:
+            query += " AND region = %s"
+            params.append(region)
+        
+        if severity:
+            query += " AND severity = %s"
+            params.append(severity)
+        
+        query += """ ORDER BY 
+            CASE severity
+                WHEN 'critical' THEN 1
+                WHEN 'high' THEN 2
+                WHEN 'medium' THEN 3
+                WHEN 'low' THEN 4
+                ELSE 5
+            END,
+            created_date DESC
+        """
+        
+        cursor.execute(query, tuple(params))
+        # RealDictCursor returns dictionaries directly
+        results = cursor.fetchall()
+        # Convert to regular dicts and handle datetime serialization
+        results = [
+            {k: v.isoformat() if hasattr(v, 'isoformat') else v for k, v in dict(row).items()}
+            for row in results
+        ]
+        
+        cursor.close()
+        db.disconnect()
         
         return JSONResponse(
             status_code=200,
@@ -421,39 +456,47 @@ async def get_reports(
     - Generation timestamps
     """
     try:
-        with DatabaseConnection() as conn:
-            cursor = conn.cursor()
+        db = DatabaseConnection()
+        db.connect()
+        cursor = db.connection.cursor()
+        
+        # Note: Using direct string interpolation for days since INTERVAL doesn't support parameterization
+        # days is validated by FastAPI (ge=1, le=180) so this is safe
+        query = f"""
+            SELECT 
+                report_id,
+                session_id,
+                conversation_id,
+                filename,
+                blob_url,
+                report_type,
+                created_date
+            FROM surveillance_reports
+            WHERE created_date >= NOW() - INTERVAL '{days} days'
+        """
+        params = []
             
-            query = """
-                SELECT 
-                    report_id,
-                    session_id,
-                    conversation_id,
-                    filename,
-                    blob_url,
-                    report_type,
-                    created_date
-                FROM surveillance_reports
-                WHERE created_date >= DATEADD(day, -?, GETDATE())
-            """
-            params = [days]
-            
-            if session_id:
-                query += " AND session_id = ?"
-                params.append(session_id)
-            
-            if report_type:
-                query += " AND report_type = ?"
-                params.append(report_type)
-            
-            query += " ORDER BY created_date DESC"
-            
-            cursor.execute(query, params)
-            columns = [column[0] for column in cursor.description]
-            results = []
-            
-            for row in cursor.fetchall():
-                results.append(dict(zip(columns, row)))
+        if session_id:
+            query += " AND session_id = %s"
+            params.append(session_id)
+        
+        if report_type:
+            query += " AND report_type = %s"
+            params.append(report_type)
+        
+        query += " ORDER BY created_date DESC"
+        
+        cursor.execute(query, tuple(params))
+        # RealDictCursor returns dictionaries directly
+        results = cursor.fetchall()
+        # Convert to regular dicts and handle datetime serialization
+        results = [
+            {k: v.isoformat() if hasattr(v, 'isoformat') else v for k, v in dict(row).items()}
+            for row in results
+        ]
+        
+        cursor.close()
+        db.disconnect()
         
         return JSONResponse(
             status_code=200,
@@ -488,31 +531,37 @@ async def get_thinking_logs(session_id: str):
     - Collaboration between agents
     """
     try:
-        with DatabaseConnection() as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT 
-                    thinking_id,
-                    agent_name,
-                    thinking_stage,
-                    thought_content,
-                    thinking_stage_output,
-                    agent_output,
-                    conversation_id,
-                    user_query,
-                    status,
-                    created_date
-                FROM agent_thinking_logs
-                WHERE session_id = ?
-                ORDER BY created_date ASC
-            """, [session_id])
-            
-            columns = [column[0] for column in cursor.description]
-            results = []
-            
-            for row in cursor.fetchall():
-                results.append(dict(zip(columns, row)))
+        db = DatabaseConnection()
+        db.connect()
+        cursor = db.connection.cursor()
+        
+        cursor.execute("""
+            SELECT 
+                thinking_id,
+                agent_name,
+                thinking_stage,
+                thought_content,
+                thinking_stage_output,
+                agent_output,
+                conversation_id,
+                user_query,
+                status,
+                created_date
+            FROM agent_thinking_logs
+            WHERE session_id = %s
+            ORDER BY created_date ASC
+        """, (session_id,))
+        
+        # RealDictCursor returns dictionaries directly
+        results = cursor.fetchall()
+        # Convert to regular dicts and handle datetime serialization
+        results = [
+            {k: v.isoformat() if hasattr(v, 'isoformat') else v for k, v in dict(row).items()}
+            for row in results
+        ]
+        
+        cursor.close()
+        db.disconnect()
         
         return JSONResponse(
             status_code=200,
@@ -543,17 +592,19 @@ async def get_data_sources():
     - Pharmacy networks
     """
     try:
-        with DatabaseConnection() as conn:
-            cursor = conn.cursor()
-            
-            # Check each data source
-            sources_status = {}
-            
-            # Hospital data
+        db = DatabaseConnection()
+        db.connect()
+        cursor = db.connection.cursor()
+        
+        # Check each data source
+        sources_status = {}
+        
+        # Hospital data
+        try:
             cursor.execute("""
                 SELECT COUNT(*), MAX(timestamp) 
                 FROM hospital_surveillance_data 
-                WHERE timestamp >= DATEADD(hour, -24, GETDATE())
+                WHERE timestamp >= NOW() - INTERVAL '24 hours'
             """)
             count, last_update = cursor.fetchone()
             sources_status['hospital'] = {
@@ -561,12 +612,15 @@ async def get_data_sources():
                 "records_24h": count,
                 "last_update": last_update.isoformat() if last_update else None
             }
-            
-            # Social media data
+        except Exception:
+            sources_status['hospital'] = {"status": "table_not_found", "records_24h": 0, "last_update": None}
+        
+        # Social media data
+        try:
             cursor.execute("""
                 SELECT COUNT(*), MAX(timestamp) 
                 FROM social_media_surveillance_data 
-                WHERE timestamp >= DATEADD(hour, -24, GETDATE())
+                WHERE timestamp >= NOW() - INTERVAL '24 hours'
             """)
             count, last_update = cursor.fetchone()
             sources_status['social_media'] = {
@@ -574,12 +628,15 @@ async def get_data_sources():
                 "records_24h": count,
                 "last_update": last_update.isoformat() if last_update else None
             }
-            
-            # Environmental data
+        except Exception:
+            sources_status['social_media'] = {"status": "table_not_found", "records_24h": 0, "last_update": None}
+        
+        # Environmental data
+        try:
             cursor.execute("""
                 SELECT COUNT(*), MAX(timestamp) 
                 FROM environmental_surveillance_data 
-                WHERE timestamp >= DATEADD(hour, -24, GETDATE())
+                WHERE timestamp >= NOW() - INTERVAL '24 hours'
             """)
             count, last_update = cursor.fetchone()
             sources_status['environmental'] = {
@@ -587,12 +644,15 @@ async def get_data_sources():
                 "records_24h": count,
                 "last_update": last_update.isoformat() if last_update else None
             }
-            
-            # Pharmacy data
+        except Exception:
+            sources_status['environmental'] = {"status": "table_not_found", "records_24h": 0, "last_update": None}
+        
+        # Pharmacy data
+        try:
             cursor.execute("""
                 SELECT COUNT(*), MAX(timestamp) 
                 FROM pharmacy_surveillance_data 
-                WHERE timestamp >= DATEADD(hour, -24, GETDATE())
+                WHERE timestamp >= NOW() - INTERVAL '24 hours'
             """)
             count, last_update = cursor.fetchone()
             sources_status['pharmacy'] = {
@@ -600,6 +660,11 @@ async def get_data_sources():
                 "records_24h": count,
                 "last_update": last_update.isoformat() if last_update else None
             }
+        except Exception:
+            sources_status['pharmacy'] = {"status": "table_not_found", "records_24h": 0, "last_update": None}
+        
+        cursor.close()
+        db.disconnect()
         
         return JSONResponse(
             status_code=200,
