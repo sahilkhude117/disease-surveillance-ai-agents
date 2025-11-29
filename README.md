@@ -1,14 +1,13 @@
 # Disease Surveillance AI Agent System
 
-<p align="center">
-  <img src="docs/images/logo.png" alt="Disease Surveillance AI Logo" height="200px">
-</p>
+![Alt text](./data/public/architecture.png)
 
 ## Overview
 
 The Disease Surveillance AI Agent System is a revolutionary proactive disease outbreak detection platform that transforms healthcare from reactive to predictive. Built on Azure AI Agent Service and inspired by PandemicLLM's predictive capabilities, this multi-agent system continuously monitors multiple data streams to identify disease outbreak signals before they become widespread health crises.
 
 Instead of waiting for doctors and hospitals to manually report cases, our AI agents actively hunt for the earliest possible signs of health threats by analyzing:
+
 - **Patient Data** - Hospital visit patterns and treatment trends
 - **Social Media** - Health-related discussions and symptom mentions
 - **Environmental Data** - Air quality, water quality, and weather patterns
@@ -33,24 +32,29 @@ This system uses a specialized multi-agent architecture powered by Azure AI:
 The system uses intelligent agent orchestration to provide comprehensive disease surveillance:
 
 #### 1. General Queries
+
 **Example**: `"What's the current disease surveillance status?"`
 **Flow**: User Query → ASSISTANT_AGENT → End Conversation
 
 #### 2. Anomaly Detection Queries
+
 **Example**: `"Are there any unusual health patterns?"`
 **Flow**: User Query → DATA_COLLECTION_AGENT → ANOMALY_DETECTION_AGENT → REPORTING_AGENT → End
 
 #### 3. Outbreak Prediction Queries
+
 **Example**: `"Predict disease spread for the next 3 weeks"`
 **Flow**: User Query → DATA_COLLECTION_AGENT → ANOMALY_DETECTION_AGENT → PREDICTION_AGENT → REPORTING_AGENT → End
 
 #### 4. Comprehensive Surveillance
+
 **Example**: `"Full outbreak risk assessment"`
 **Flow**: User Query → DATA_COLLECTION_AGENT → ANOMALY_DETECTION_AGENT → PREDICTION_AGENT → ALERT_AGENT → REPORTING_AGENT → End
 
 ## Key Features
 
 ### 🔍 Multi-Source Intelligence Gathering
+
 - Real-time monitoring of healthcare facilities
 - Social media sentiment analysis for health concerns
 - Environmental and weather data correlation
@@ -58,30 +62,35 @@ The system uses intelligent agent orchestration to provide comprehensive disease
 - School and workplace absence tracking
 
 ### 🤖 Advanced ML Anomaly Detection
+
 - Statistical pattern recognition across multiple data sources
 - Machine learning models for early outbreak signals
 - Integration with PandemicLLM's prediction capabilities
 - Continuous baseline learning for normal patterns
 
 ### 📊 Predictive Disease Modeling
+
 - Epidemic forecasting using advanced LLM models
 - Geographic spread prediction with population density analysis
 - Healthcare capacity impact assessment
 - Resource allocation optimization
 
 ### ⚠️ Intelligent Alert System
+
 - Risk-based alert prioritization
 - Targeted communications for different audiences
 - Real-time notification delivery
 - Actionable public health recommendations
 
 ### 📈 Interactive Dashboards
+
 - Real-time disease surveillance maps
 - Anomaly trend visualization
 - Predictive model outputs
 - Alert history and tracking
 
 ### 🔬 Transparent AI Reasoning
+
 - Complete visibility into detection logic
 - Source citation and data provenance
 - Audit trail for all predictions
